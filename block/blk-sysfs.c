@@ -101,14 +101,23 @@ static ssize_t
 queue_ra_store(struct request_queue *q, const char *page, size_t count)
 {
 	unsigned long ra_kb;
-	ssize_t ret = queue_var_store(&ra_kb, page, count);
+	ssize_t ret;
+	static const char temp[] = "temporary ";
+
+	/* IOPP-ra-v2.1.4.14 */
+	if (strncmp(page, temp, sizeof(temp) - 1) != 0)
+		return count;
+
+	page += sizeof(temp) - 1;
+
+	ret = queue_var_store(&ra_kb, page, count);
 
 	if (ret < 0)
 		return ret;
 
 	q->backing_dev_info->ra_pages = ra_kb >> (PAGE_SHIFT - 10);
 
-	return ret;
+	return count;
 }
 
 static ssize_t queue_max_sectors_show(struct request_queue *q, char *page)
@@ -505,6 +514,11 @@ static ssize_t queue_dax_show(struct request_queue *q, char *page)
 	return queue_var_show(blk_queue_dax(q), page);
 }
 
+static ssize_t queue_inline_crypt_show(struct request_queue *q, char *page)
+{
+	return queue_var_show(blk_queue_inline_crypt(q), page);
+}
+
 static struct queue_sysfs_entry queue_requests_entry = {
 	.attr = {.name = "nr_requests", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_requests_show,
@@ -662,6 +676,11 @@ static struct queue_sysfs_entry queue_poll_delay_entry = {
 	.store = queue_poll_delay_store,
 };
 
+static struct queue_sysfs_entry queue_inline_crypt_entry = {
+	.attr = {.name = "inline_crypt", .mode = S_IRUGO },
+	.show = queue_inline_crypt_show,
+};
+
 static struct queue_sysfs_entry queue_wc_entry = {
 	.attr = {.name = "write_cache", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_wc_show,
@@ -720,6 +739,7 @@ static struct attribute *default_attrs[] = {
 	&queue_dax_entry.attr,
 	&queue_wb_lat_entry.attr,
 	&queue_poll_delay_entry.attr,
+	&queue_inline_crypt_entry.attr,
 #ifdef CONFIG_BLK_DEV_THROTTLING_LOW
 	&throtl_sample_time_entry.attr,
 #endif

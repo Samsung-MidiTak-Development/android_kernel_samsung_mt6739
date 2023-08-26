@@ -3,6 +3,7 @@
 # Makefile for the kernel block layer
 #
 
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include
 obj-$(CONFIG_BLOCK) := bio.o elevator.o blk-core.o blk-tag.o blk-sysfs.o \
 			blk-flush.o blk-settings.o blk-ioc.o blk-map.o \
 			blk-exec.o blk-merge.o blk-softirq.o blk-timeout.o \
@@ -35,3 +36,15 @@ obj-$(CONFIG_BLK_DEV_ZONED)	+= blk-zoned.o
 obj-$(CONFIG_BLK_WBT)		+= blk-wbt.o
 obj-$(CONFIG_BLK_DEBUG_FS)	+= blk-mq-debugfs.o
 obj-$(CONFIG_BLK_SED_OPAL)	+= sed-opal.o
+
+# [IOPP-Wformat-v1.0.4.14.patch]
+# check calls to printf and scanf, etc.,
+# to make sure that the arguments supplied have types appropriate to the format string specified,
+# and that the conversions specified in the format string make sense.
+CFLAGS_blk-core.o = -Wformat
+CFLAGS_blk-sysfs.o = -Wformat
+CFLAGS_blk-merge.o = -Wformat
+CFLAGS_elevator.o = -Wformat
+CFLAGS_cfq-iosched.o = -Wformat
+CFLAGS_genhd.o = -Wformat
+

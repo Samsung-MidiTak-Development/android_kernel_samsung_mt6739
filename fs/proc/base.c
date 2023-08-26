@@ -93,6 +93,7 @@
 #include <linux/sched/stat.h>
 #include <linux/flex_array.h>
 #include <linux/posix-timers.h>
+#include <linux/cpufreq_times.h>
 #ifdef CONFIG_HARDWALL
 #include <asm/hardwall.h>
 #endif
@@ -248,8 +249,10 @@ static ssize_t proc_pid_cmdline_read(struct file *file, char __user *buf,
 	env_end = mm->env_end;
 	up_read(&mm->mmap_sem);
 
-	BUG_ON(arg_start > arg_end);
-	BUG_ON(env_start > env_end);
+	if ((arg_start > arg_end) || (env_start > env_end)) {
+		rv = 0;
+		goto out_mmput;
+	}
 
 	len1 = arg_end - arg_start;
 	len2 = env_end - env_start;
@@ -484,6 +487,29 @@ static int proc_pid_schedstat(struct seq_file *m, struct pid_namespace *ns,
 		   (unsigned long long)task->se.sum_exec_runtime,
 		   (unsigned long long)task->sched_info.run_delay,
 		   task->sched_info.pcount);
+
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_UCLAMP_TASK
+/*
+ * Provides /proc/PID/tasks/TID/util_clamp
+ */
+static int proc_pid_util_clamp(struct seq_file *m, struct pid_namespace *ns,
+			      struct pid *pid, struct task_struct *task)
+{
+	unsigned int util_min, effective_util_min;
+	unsigned int util_max, effective_util_max;
+
+	util_min = uclamp_task_util(task, UCLAMP_MIN);
+	util_max = uclamp_task_util(task, UCLAMP_MAX);
+	effective_util_min = uclamp_task_effective_util(task, UCLAMP_MIN);
+	effective_util_max = uclamp_task_effective_util(task, UCLAMP_MAX);
+
+	seq_printf(m, "min: %u min_eff: %u\nmax: %u max_eff: %u\n",
+			util_min, effective_util_min,
+			util_max, effective_util_max);
 
 	return 0;
 }
@@ -2928,6 +2954,36 @@ static int proc_pid_patch_state(struct seq_file *m, struct pid_namespace *ns,
 }
 #endif /* CONFIG_LIVEPATCH */
 
+#ifdef CONFIG_PROC_TRIGGER_SQLITE_BUG
+/* @fs.sec -- C9CF9B5FDB32AE3C7E20B7D543EF2CCD -- */
+static ssize_t trigger_sqlite_bug_write(struct file *file,
+		const char __user *buf, size_t count, loff_t *offset)
+{
+	char buffer[PROC_NUMBUF] = {0, };
+	int ret;
+	int fd;
+	struct file *filp;
+
+	if (count > sizeof(buffer) - 1)
+		return -EINVAL;
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+	ret = kstrtoint(strstrip(buffer), 10, &fd);
+	if (ret < 0)
+		return ret;
+
+	filp = fget(fd);
+
+	pr_err("%s: fd=%d filp=%p %s", __func__, fd, filp,
+			filp ? filp->f_path.dentry->d_name.name : NULL);
+	BUG();
+}
+
+const struct file_operations proc_trigger_sqlite_bug_operations = {
+	.write	= trigger_sqlite_bug_write,
+};
+#endif /* CONFIG_PROC_TRIGGER_SQLITE_BUG */
+
 /*
  * Thread groups
  */
@@ -2961,6 +3017,7 @@ static const struct pid_entry tgid_base_stuff[] = {
 	REG("cmdline",    S_IRUGO, proc_pid_cmdline_ops),
 	ONE("stat",       S_IRUGO, proc_tgid_stat),
 	ONE("statm",      S_IRUGO, proc_pid_statm),
+	ONE("statlmkd",      S_IRUGO, proc_pid_statlmkd),
 	REG("maps",       S_IRUGO, proc_pid_maps_operations),
 #ifdef CONFIG_NUMA
 	REG("numa_maps",  S_IRUGO, proc_pid_numa_maps_operations),
@@ -2972,6 +3029,9 @@ static const struct pid_entry tgid_base_stuff[] = {
 	REG("mounts",     S_IRUGO, proc_mounts_operations),
 	REG("mountinfo",  S_IRUGO, proc_mountinfo_operations),
 	REG("mountstats", S_IRUSR, proc_mountstats_operations),
+#ifdef CONFIG_PROCESS_RECLAIM
+	REG("reclaim", 0222, proc_reclaim_operations),
+#endif
 #ifdef CONFIG_PROC_PAGE_MONITOR
 	REG("clear_refs", S_IWUSR, proc_clear_refs_operations),
 	REG("smaps",      S_IRUGO, proc_pid_smaps_operations),
@@ -3031,6 +3091,12 @@ static const struct pid_entry tgid_base_stuff[] = {
 	REG("timerslack_ns", S_IRUGO|S_IWUGO, proc_pid_set_timerslack_ns_operations),
 #ifdef CONFIG_LIVEPATCH
 	ONE("patch_state",  S_IRUSR, proc_pid_patch_state),
+#endif
+#ifdef CONFIG_CPU_FREQ_TIMES
+	ONE("time_in_state", 0444, proc_time_in_state_show),
+#endif
+#ifdef CONFIG_PROC_TRIGGER_SQLITE_BUG
+	REG("trigger_sqlite_bug", S_IWUSR, proc_trigger_sqlite_bug_operations),
 #endif
 };
 
@@ -3353,6 +3419,7 @@ static const struct pid_entry tid_base_stuff[] = {
 	REG("cmdline",   S_IRUGO, proc_pid_cmdline_ops),
 	ONE("stat",      S_IRUGO, proc_tid_stat),
 	ONE("statm",     S_IRUGO, proc_pid_statm),
+	ONE("statlmkd",      S_IRUGO, proc_pid_statlmkd),
 	REG("maps",      S_IRUGO, proc_tid_maps_operations),
 #ifdef CONFIG_PROC_CHILDREN
 	REG("children",  S_IRUGO, proc_tid_children_operations),
@@ -3383,6 +3450,9 @@ static const struct pid_entry tid_base_stuff[] = {
 #endif
 #ifdef CONFIG_SCHED_INFO
 	ONE("schedstat", S_IRUGO, proc_pid_schedstat),
+#endif
+#ifdef CONFIG_UCLAMP_TASK
+	ONE("util_clamp",  0444, proc_pid_util_clamp),
 #endif
 #ifdef CONFIG_LATENCYTOP
 	REG("latency",  S_IRUGO, proc_lstats_operations),
@@ -3418,6 +3488,9 @@ static const struct pid_entry tid_base_stuff[] = {
 #endif
 #ifdef CONFIG_LIVEPATCH
 	ONE("patch_state",  S_IRUSR, proc_pid_patch_state),
+#endif
+#ifdef CONFIG_CPU_FREQ_TIMES
+	ONE("time_in_state", 0444, proc_time_in_state_show),
 #endif
 };
 

@@ -40,6 +40,11 @@
 #include <asm/tls.h>
 #include <asm/system_misc.h>
 #include <asm/opcodes.h>
+#include <mt-plat/aee.h>
+
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
 
 
 static const char *handler[]= {
@@ -76,6 +81,20 @@ void dump_backtrace_entry(unsigned long where, unsigned long from, unsigned long
 	if (in_exception_text(where))
 		dump_mem("", "Exception stack", frame + 4, frame + 4 + sizeof(struct pt_regs));
 }
+
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+void dump_backtrace_entry_auto_summary(unsigned long where, unsigned long from, unsigned long frame)
+{
+#ifdef CONFIG_KALLSYMS
+	pr_auto(ASL2, "[<%08lx>] (%ps) from [<%08lx>] (%pS)\n", where, (void *)where, from, (void *)from);
+#else
+	pr_auto(ASL2, "Function entered at [<%08lx>] from [<%08lx>]\n", where, from);
+#endif
+
+	if (in_exception_text(where))
+		dump_mem("", "Exception stack", frame + 4, frame + 4 + sizeof(struct pt_regs));
+}
+#endif
 
 void dump_backtrace_stm(u32 *stack, u32 instruction)
 {
@@ -212,7 +231,12 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 	unsigned int fp, mode;
 	int ok = 1;
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto_once(2);
+	pr_auto(ASL2, "Backtrace: ");
+#else
 	printk("Backtrace: ");
+#endif
 
 	if (!tsk)
 		tsk = current;
@@ -229,14 +253,31 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 	}
 
 	if (!fp) {
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+		pr_auto(ASL2, "no frame pointer");
+#else
 		pr_cont("no frame pointer");
+#endif
 		ok = 0;
 	} else if (verify_stack(fp)) {
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+		pr_auto(ASL2, "no frame pointer");
+#else
 		pr_cont("invalid frame pointer 0x%08x", fp);
+#endif
 		ok = 0;
-	} else if (fp < (unsigned long)end_of_stack(tsk))
+	} else if (fp < (unsigned long)end_of_stack(tsk)) {
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+		pr_auto(ASL2, "no frame pointer");
+#else
 		pr_cont("frame pointer underflow");
+#endif
+	}
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL2, "\n");
+#else
 	pr_cont("\n");
+#endif
 
 	if (ok)
 		c_backtrace(fp, mode);
@@ -351,6 +392,10 @@ void die(const char *str, struct pt_regs *regs, int err)
 {
 	enum bug_trap_type bug_type = BUG_TRAP_TYPE_NONE;
 	unsigned long flags = oops_begin();
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (regs && (!user_mode(regs)))
+		sec_debug_set_extra_info_backtrace(regs);
+#endif
 	int sig = SIGSEGV;
 
 	if (!user_mode(regs))
@@ -362,6 +407,22 @@ void die(const char *str, struct pt_regs *regs, int err)
 		sig = 0;
 
 	oops_end(flags, regs, sig);
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (in_interrupt()) {
+		if (regs)
+			panic("%s\nPC is at %pS\nLR is at %pS",
+				  "Fatal exception in interrupt", (void *)regs->ARM_pc, (void *)regs->ARM_lr);
+		else
+			panic("Fatal exception in interrupt");
+	}
+	if (panic_on_oops) {
+		if (regs)
+			panic("%s\nPC is at %pS\nLR is at %pS",
+				  "Fatal exception", (void *)regs->ARM_pc, (void *)regs->ARM_lr);
+		else
+			panic("Fatal exception");
+	}
+#endif
 }
 
 void arm_notify_die(const char *str, struct pt_regs *regs,
@@ -437,9 +498,25 @@ int call_undef_hook(struct pt_regs *regs, unsigned int instr)
 
 asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 {
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (!user_mode(regs)) {
+		sec_debug_set_extra_info_fault((unsigned long)regs->ARM_pc, regs);
+	}
+#endif
+	struct thread_info *thread = current_thread_info();
 	unsigned int instr;
 	siginfo_t info;
 	void __user *pc;
+
+	if (!user_mode(regs)) {
+		thread->cpu_excp++;
+		if (thread->cpu_excp == 1) {
+			thread->regs_on_excp = (void *)regs;
+			aee_excp_regs = (void *)regs;
+		}
+		if (thread->cpu_excp >= 2)
+			aee_stop_nested_panic(regs);
+	}
 
 	pc = (void __user *)instruction_pointer(regs);
 
@@ -472,8 +549,11 @@ asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 		instr = __mem_to_opcode_arm(instr);
 	}
 
-	if (call_undef_hook(regs, instr) == 0)
+	if (call_undef_hook(regs, instr) == 0) {
+		if (!user_mode(regs))
+			thread->cpu_excp--;
 		return;
+	}
 
 die_sig:
 #ifdef CONFIG_DEBUG_USER
@@ -529,7 +609,16 @@ asmlinkage void bad_mode(struct pt_regs *regs, int reason)
 {
 	console_verbose();
 
-	pr_crit("Bad mode in %s handler detected\n", handler[reason]);
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "Bad mode in %s handler detected on CPU%d\n", handler[reason], smp_processor_id());
+#else
+	pr_crit("Bad mode in %s handler detected on CPU%d\n", handler[reason], smp_processor_id());
+#endif
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (!user_mode(regs)) {
+		sec_debug_set_extra_info_fault((unsigned long)regs->ARM_pc, regs);
+	}
+#endif
 
 	die("Oops - bad mode", regs, 0);
 	local_irq_disable();
@@ -858,3 +947,4 @@ void __init early_trap_init(void *vectors_base)
 	 */
 #endif
 }
+

@@ -30,6 +30,10 @@
 #include <linux/cpufreq.h>
 #include <linux/irq_work.h>
 
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+
 #include <linux/atomic.h>
 #include <asm/bugs.h>
 #include <asm/smp.h>
@@ -54,6 +58,14 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/ipi.h>
+
+#ifdef CONFIG_MTK_SCHED_MONITOR
+#include "mtk_sched_mon.h"
+#endif
+
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+DEFINE_PER_CPU(uint32_t, cpu_online_fail_cnt);
+#endif
 
 /*
  * as from 2.5, kernels no longer have an init_tasks structure
@@ -170,6 +182,9 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 						 msecs_to_jiffies(1000));
 
 		if (!cpu_online(cpu)) {
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+			per_cpu(cpu_online_fail_cnt, cpu)++;
+#endif
 			pr_crit("CPU%u: failed to come online\n", cpu);
 			ret = -EIO;
 		}
@@ -249,6 +264,17 @@ int __cpu_disable(void)
 	if (ret)
 		return ret;
 
+#ifdef CONFIG_MTK_GIC_TARGET_ALL
+	{
+		unsigned long flags;
+
+		/*
+		 * we disable irq here to ensure target all feature
+		 * did not bother this cpu after status as offline
+		 */
+		local_irq_save(flags);
+	}
+#endif
 	/*
 	 * Take this CPU offline.  Once we clear this, we can't return,
 	 * and we must not schedule until we're ready to give up the cpu.
@@ -592,7 +618,7 @@ static DEFINE_RAW_SPINLOCK(stop_lock);
 /*
  * ipi_cpu_stop - handle IPI from smp_send_stop()
  */
-static void ipi_cpu_stop(unsigned int cpu)
+static void ipi_cpu_stop(unsigned int cpu, struct pt_regs *regs)
 {
 	if (system_state <= SYSTEM_RUNNING) {
 		raw_spin_lock(&stop_lock);
@@ -605,6 +631,10 @@ static void ipi_cpu_stop(unsigned int cpu)
 
 	local_fiq_disable();
 	local_irq_disable();
+	
+#ifdef CONFIG_SEC_DEBUG
+	sec_save_context(_THIS_CPU, regs);
+#endif
 
 	while (1) {
 		cpu_relax();
@@ -645,12 +675,22 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 
 	switch (ipinr) {
 	case IPI_WAKEUP:
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_start(ipinr);
+		mt_trace_IPI_end(ipinr);
+#endif
 		break;
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 	case IPI_TIMER:
 		irq_enter();
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_start(ipinr);
+#endif
 		tick_receive_broadcast();
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_end(ipinr);
+#endif
 		irq_exit();
 		break;
 #endif
@@ -661,34 +701,64 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 
 	case IPI_CALL_FUNC:
 		irq_enter();
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_start(ipinr);
+#endif
 		generic_smp_call_function_interrupt();
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_end(ipinr);
+#endif
 		irq_exit();
 		break;
 
 	case IPI_CPU_STOP:
 		irq_enter();
-		ipi_cpu_stop(cpu);
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_start(ipinr);
+#endif
+		ipi_cpu_stop(cpu, regs);
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_end(ipinr);
+#endif
 		irq_exit();
 		break;
 
 #ifdef CONFIG_IRQ_WORK
 	case IPI_IRQ_WORK:
 		irq_enter();
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_start(ipinr);
+#endif
 		irq_work_run();
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_end(ipinr);
+#endif
 		irq_exit();
 		break;
 #endif
 
 	case IPI_COMPLETION:
 		irq_enter();
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_start(ipinr);
+#endif
 		ipi_complete(cpu);
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_end(ipinr);
+#endif
 		irq_exit();
 		break;
 
 	case IPI_CPU_BACKTRACE:
 		printk_nmi_enter();
 		irq_enter();
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_start(ipinr);
+#endif
 		nmi_cpu_backtrace(regs);
+#ifdef CONFIG_MTK_SCHED_MONITOR
+		mt_trace_IPI_end(ipinr);
+#endif
 		irq_exit();
 		printk_nmi_exit();
 		break;

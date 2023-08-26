@@ -25,6 +25,7 @@ source "drivers/nvme/Kconfig"
 
 source "drivers/misc/Kconfig"
 
+source "drivers/muic/Kconfig"
 source "drivers/ide/Kconfig"
 
 source "drivers/scsi/Kconfig"
@@ -76,6 +77,8 @@ source "drivers/power/Kconfig"
 source "drivers/hwmon/Kconfig"
 
 source "drivers/thermal/Kconfig"
+
+source "drivers/trusty/Kconfig"
 
 source "drivers/watchdog/Kconfig"
 
@@ -173,6 +176,10 @@ source "drivers/irqchip/Kconfig"
 
 source "drivers/ipack/Kconfig"
 
+source "drivers/battery/Kconfig"
+
+source "drivers/battery_v2/Kconfig"
+
 source "drivers/reset/Kconfig"
 
 source "drivers/fmc/Kconfig"
@@ -208,5 +215,15 @@ source "drivers/fsi/Kconfig"
 source "drivers/tee/Kconfig"
 
 source "drivers/mux/Kconfig"
+
+source "drivers/samsung/Kconfig"
+
+source "drivers/sensors/Kconfig"
+
+source "drivers/switch/Kconfig"
+
+source "drivers/motor/Kconfig"
+
+source "drivers/spu_verify/Kconfig"
 
 endmenu

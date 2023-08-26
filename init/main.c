@@ -89,11 +89,23 @@
 #include <linux/cache.h>
 #include <linux/rodata_test.h>
 
+#ifdef CONFIG_SEC_BOOTSTAT
+#include <linux/sec_ext.h>
+#endif
+
 #include <asm/io.h>
 #include <asm/bugs.h>
 #include <asm/setup.h>
 #include <asm/sections.h>
 #include <asm/cacheflush.h>
+
+#ifdef CONFIG_SEC_GPIO_DVS
+#include <linux/secgpio_dvs.h>
+#endif
+
+#ifdef CONFIG_MTK_RAM_CONSOLE
+#include <mt-plat/mtk_ram_console.h>
+#endif
 
 static int kernel_init(void *);
 
@@ -187,13 +199,21 @@ static bool __init obsolete_checksetup(char *line)
 			} else if (!p->setup_func) {
 				pr_warn("Parameter %s is obsolete, ignored\n",
 					p->str);
-				return true;
-			} else if (p->setup_func(line + n))
-				return true;
+				had_early_param = true;
+				goto fail;
+			} else {
+				set_memsize_reserved_name(p->str);
+				if (p->setup_func(line + n)) {
+					had_early_param = true;
+					goto fail;
+				}
+			}
 		}
 		p++;
 	} while (p < __setup_end);
 
+fail:
+	unset_memsize_reserved_name();
 	return had_early_param;
 }
 
@@ -446,11 +466,13 @@ static int __init do_early_param(char *param, char *val,
 		    (strcmp(param, "console") == 0 &&
 		     strcmp(p->str, "earlycon") == 0)
 		) {
+			set_memsize_reserved_name(p->str);
 			if (p->setup_func(val) != 0)
 				pr_warn("Malformed early option '%s'\n", param);
 		}
 	}
 	/* We accept everything at this stage. */
+	unset_memsize_reserved_name();
 	return 0;
 }
 
@@ -494,6 +516,7 @@ void __init __weak mem_encrypt_init(void) { }
  */
 static void __init mm_init(void)
 {
+	set_memsize_kernel_type(MEMSIZE_KERNEL_MM_INIT);
 	/*
 	 * page_ext requires contiguous pages,
 	 * bigger than MAX_ORDER unless SPARSEMEM.
@@ -508,6 +531,7 @@ static void __init mm_init(void)
 	init_espfix_bsp();
 	/* Should be run after espfix64 is set up. */
 	pti_init();
+	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 }
 
 asmlinkage __visible void __init start_kernel(void)
@@ -515,6 +539,7 @@ asmlinkage __visible void __init start_kernel(void)
 	char *command_line;
 	char *after_dashes;
 
+	set_memsize_kernel_type(MEMSIZE_KERNEL_OTHERS);
 	set_task_stack_end_magic(&init_task);
 	smp_setup_processor_id();
 	debug_objects_early_init();
@@ -571,6 +596,10 @@ asmlinkage __visible void __init start_kernel(void)
 	sort_main_extable();
 	trap_init();
 	mm_init();
+	
+#if defined(CONFIG_SEC_BOOTSTAT)
+	sec_boot_stat_get_start_kernel();
+#endif
 
 	ftrace_init();
 
@@ -705,6 +734,7 @@ asmlinkage __visible void __init start_kernel(void)
 		efi_free_boot_services();
 	}
 
+	set_memsize_kernel_type(MEMSIZE_KERNEL_STOP);
 	/* Do the rest non-__init'ed, we're now alive */
 	rest_init();
 }
@@ -809,21 +839,34 @@ static int __init_or_module do_one_initcall_debug(initcall_t fn)
 
 	return ret;
 }
+#ifdef CONFIG_MTPROF
+#include <bootprof.h>
+#else
+#define TIME_LOG_START()
+#define TIME_LOG_END()
+#define bootprof_initcall(fn, ts)
+#endif
 
 int __init_or_module do_one_initcall(initcall_t fn)
 {
 	int count = preempt_count();
 	int ret;
 	char msgbuf[64];
-
+#ifdef CONFIG_MTPROF
+	unsigned long long ts = 0;
+#endif
 	if (initcall_blacklisted(fn))
 		return -EPERM;
 
+#ifdef CONFIG_MTK_RAM_CONSOLE
+	aee_rr_rec_last_init_func((unsigned long)fn);
+#endif
+	TIME_LOG_START();
 	if (initcall_debug)
 		ret = do_one_initcall_debug(fn);
 	else
 		ret = fn();
-
+	TIME_LOG_END();
 	msgbuf[0] = 0;
 
 	if (preempt_count() != count) {
@@ -837,6 +880,7 @@ int __init_or_module do_one_initcall(initcall_t fn)
 	WARN(msgbuf[0], "initcall %pF returned with %s\n", fn, msgbuf);
 
 	add_latent_entropy();
+	bootprof_initcall(fn, ts);
 	return ret;
 }
 
@@ -889,6 +933,9 @@ static void __init do_initcall_level(int level)
 
 	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)
 		do_one_initcall(*fn);
+#if defined(CONFIG_SEC_BOOTSTAT)
+	sec_boot_stat_add_initcall(initcall_level_names[level]);
+#endif
 }
 
 static void __init do_initcalls(void)
@@ -897,6 +944,9 @@ static void __init do_initcalls(void)
 
 	for (level = 0; level < ARRAY_SIZE(initcall_levels) - 1; level++)
 		do_initcall_level(level);
+#ifdef CONFIG_MTK_RAM_CONSOLE
+	aee_rr_rec_last_init_func(~(unsigned long)(0));
+#endif
 }
 
 /*
@@ -997,6 +1047,17 @@ static int __ref kernel_init(void *unused)
 	int ret;
 
 	kernel_init_freeable();
+	
+#ifdef CONFIG_SEC_GPIO_DVS
+	/************************ Caution !!! ****************************/
+	/**
+	 * This function must be located in an appropriate position for INIT state
+	 * in accordance with the specification of each BB vendor.
+	 */
+	/************************ Caution !!! ****************************/
+	gpio_dvs_check_initgpio();
+#endif
+
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
 	ftrace_free_init_mem();
@@ -1006,7 +1067,9 @@ static int __ref kernel_init(void *unused)
 	numa_default_policy();
 
 	rcu_end_inkernel_boot();
-
+#ifdef CONFIG_MTPROF
+		log_boot("Kernel_init_done");
+#endif
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);
 		if (!ret)

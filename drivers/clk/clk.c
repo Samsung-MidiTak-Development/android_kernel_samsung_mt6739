@@ -731,6 +731,8 @@ static void clk_core_disable_unprepare(struct clk_core *core)
 	clk_core_unprepare_lock(core);
 }
 
+#if (!defined(CONFIG_MACH_MT6771) && !defined(CONFIG_MACH_MT6739) &&	\
+	!defined(CONFIG_MACH_MT6785) && !defined(CONFIG_MACH_MT6768))
 static void clk_unprepare_unused_subtree(struct clk_core *core)
 {
 	struct clk_core *child;
@@ -796,6 +798,7 @@ unlock_out:
 	if (core->flags & CLK_OPS_PARENT_ENABLE)
 		clk_core_disable_unprepare(core->parent);
 }
+#endif
 
 static bool clk_ignore_unused;
 static int __init clk_ignore_unused_setup(char *__unused)
@@ -807,13 +810,18 @@ __setup("clk_ignore_unused", clk_ignore_unused_setup);
 
 static int clk_disable_unused(void)
 {
+#if (!defined(CONFIG_MACH_MT6771) && !defined(CONFIG_MACH_MT6739) &&	\
+	!defined(CONFIG_MACH_MT6785) && !defined(CONFIG_MACH_MT6768))
 	struct clk_core *core;
+#endif
 
 	if (clk_ignore_unused) {
 		pr_warn("clk: Not disabling unused clocks\n");
 		return 0;
 	}
 
+#if (!defined(CONFIG_MACH_MT6771) && !defined(CONFIG_MACH_MT6739) &&	\
+	!defined(CONFIG_MACH_MT6785) && !defined(CONFIG_MACH_MT6768))
 	clk_prepare_lock();
 
 	hlist_for_each_entry(core, &clk_root_list, child_node)
@@ -829,7 +837,7 @@ static int clk_disable_unused(void)
 		clk_unprepare_unused_subtree(core);
 
 	clk_prepare_unlock();
-
+#endif
 	return 0;
 }
 late_initcall_sync(clk_disable_unused);
@@ -3291,6 +3299,42 @@ unsigned int of_clk_get_parent_count(struct device_node *np)
 	return count;
 }
 EXPORT_SYMBOL_GPL(of_clk_get_parent_count);
+
+#ifdef CONFIG_SEC_PM
+static void clock_debug_print_clock(struct clk_core *c, int level)
+{
+	struct clk_core *child;
+
+	if (!c || !c->enable_count)
+		return ;
+
+	pr_info("%*s%-*s %11d %12d %11lu %10lu %-3d\n",
+		   level * 3 + 1, "",
+		   30 - level * 3, c->name,
+		   c->enable_count, c->prepare_count, clk_core_get_rate(c),
+		   clk_core_get_accuracy(c), clk_core_get_phase(c));
+
+	hlist_for_each_entry(child, &c->children, child_node)
+		clock_debug_print_clock(child, level + 1);
+}
+
+void clock_debug_print_enabled(void)
+{
+	struct clk_core *c;
+	struct hlist_head **lists = (struct hlist_head **)all_lists;
+
+	pr_info("   clock                         enable_cnt  prepare_cnt        rate   accuracy   phase\n");
+	pr_info("----------------------------------------------------------------------------------------\n");
+
+	clk_prepare_lock();
+
+	for (; *lists; lists++)
+		hlist_for_each_entry(c, *lists, child_node)
+			clock_debug_print_clock(c, 0);
+
+	clk_prepare_unlock();
+}
+#endif
 
 const char *of_clk_get_parent_name(struct device_node *np, int index)
 {

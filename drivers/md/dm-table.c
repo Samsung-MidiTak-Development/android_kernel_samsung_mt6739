@@ -418,6 +418,29 @@ dev_t dm_get_dev_t(const char *path)
 		bdput(bdev);
 	}
 
+	if (!dev) {
+		unsigned int wait_time_ms = 0;
+
+		DMERR("%s: retry %s\n", __func__, path);
+		while (driver_probe_done() != 0 || dev == 0) {
+			msleep(100);
+			wait_time_ms += 100;
+			if (wait_time_ms > DM_WAIT_DEV_MAX_TIME) {
+				DMERR("%s: retry timeout(%dms)\n", __func__,
+					DM_WAIT_DEV_MAX_TIME);
+				DMERR("no dev found for %s", path);
+				return 0;
+			}
+			bdev = lookup_bdev(path);
+			if (IS_ERR(bdev))
+				dev = name_to_dev_t(path);
+			else {
+				dev = bdev->bd_dev;
+				bdput(bdev);
+			}
+		}
+	}
+
 	return dev;
 }
 EXPORT_SYMBOL_GPL(dm_get_dev_t);
@@ -547,14 +570,14 @@ static int adjoin(struct dm_table *table, struct dm_target *ti)
  * On the other hand, dm-switch needs to process bulk data using messages and
  * excessive use of GFP_NOIO could cause trouble.
  */
-static char **realloc_argv(unsigned *array_size, char **old_argv)
+static char **realloc_argv(unsigned *size, char **old_argv)
 {
 	char **argv;
 	unsigned new_size;
 	gfp_t gfp;
 
-	if (*array_size) {
-		new_size = *array_size * 2;
+	if (*size) {
+		new_size = *size * 2;
 		gfp = GFP_KERNEL;
 	} else {
 		new_size = 8;
@@ -562,8 +585,8 @@ static char **realloc_argv(unsigned *array_size, char **old_argv)
 	}
 	argv = kmalloc(new_size * sizeof(*argv), gfp);
 	if (argv) {
-		memcpy(argv, old_argv, *array_size * sizeof(*argv));
-		*array_size = new_size;
+		memcpy(argv, old_argv, *size * sizeof(*argv));
+		*size = new_size;
 	}
 
 	kfree(old_argv);
@@ -1792,36 +1815,6 @@ static bool dm_table_supports_discards(struct dm_table *t)
 	return true;
 }
 
-static int device_requires_stable_pages(struct dm_target *ti,
-					struct dm_dev *dev, sector_t start,
-					sector_t len, void *data)
-{
-	struct request_queue *q = bdev_get_queue(dev->bdev);
-
-	return q && bdi_cap_stable_pages_required(q->backing_dev_info);
-}
-
-/*
- * If any underlying device requires stable pages, a table must require
- * them as well.  Only targets that support iterate_devices are considered:
- * don't want error, zero, etc to require stable pages.
- */
-static bool dm_table_requires_stable_pages(struct dm_table *t)
-{
-	struct dm_target *ti;
-	unsigned i;
-
-	for (i = 0; i < dm_table_get_num_targets(t); i++) {
-		ti = dm_table_get_target(t, i);
-
-		if (ti->type->iterate_devices &&
-		    ti->type->iterate_devices(ti, device_requires_stable_pages, NULL))
-			return true;
-	}
-
-	return false;
-}
-
 void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 			       struct queue_limits *limits)
 {
@@ -1843,6 +1836,10 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 			fua = true;
 	}
 	blk_queue_write_cache(q, wc, fua);
+
+	/* Inherit inline-crypt capability of underlying devices. */
+	if (dm_table_supports_flush(t, (1UL << QUEUE_FLAG_INLINECRYPT)))
+		queue_flag_set_unlocked(QUEUE_FLAG_INLINECRYPT, q);
 
 	if (dm_table_supports_dax(t))
 		queue_flag_set_unlocked(QUEUE_FLAG_DAX, q);
@@ -1871,15 +1868,6 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 	dm_table_verify_integrity(t);
 
 	/*
-	 * Some devices don't use blk_integrity but still want stable pages
-	 * because they do their own checksumming.
-	 */
-	if (dm_table_requires_stable_pages(t))
-		q->backing_dev_info->capabilities |= BDI_CAP_STABLE_WRITES;
-	else
-		q->backing_dev_info->capabilities &= ~BDI_CAP_STABLE_WRITES;
-
-	/*
 	 * Determine whether or not this queue's I/O timings contribute
 	 * to the entropy pool, Only request-based targets use this.
 	 * Clear QUEUE_FLAG_ADD_RANDOM if any underlying device does not
@@ -1900,6 +1888,9 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 	smp_mb();
 	if (dm_table_request_based(t))
 		queue_flag_set_unlocked(QUEUE_FLAG_STACKABLE, q);
+
+	/* io_pages is used for readahead */
+	q->backing_dev_info->io_pages = limits->max_sectors >> (PAGE_SHIFT - 9);
 }
 
 unsigned int dm_table_get_num_targets(struct dm_table *t)

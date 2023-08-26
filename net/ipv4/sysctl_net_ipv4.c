@@ -26,6 +26,7 @@
 #include <net/inet_frag.h>
 #include <net/ping.h>
 #include <net/protocol.h>
+#include <net/ip6_route.h>
 
 static int zero;
 static int one = 1;
@@ -197,6 +198,21 @@ static int ipv4_ping_group_range(struct ctl_table *table, int write,
 		}
 		set_ping_group_range(table, low, high);
 	}
+
+	return ret;
+}
+
+/* Validate changes from /proc interface. */
+static int proc_tcp_default_init_rwnd(struct ctl_table *ctl, int write,
+				      void __user *buffer,
+				      size_t *lenp, loff_t *ppos)
+{
+	int old_value = *(int *)ctl->data;
+	int ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
+	int new_value = *(int *)ctl->data;
+
+	if (write && ret == 0 && (new_value < 3 || new_value > 100))
+		*(int *)ctl->data = old_value;
 
 	return ret;
 }
@@ -729,6 +745,13 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler   = proc_tcp_available_ulp,
 	},
 	{
+		.procname       = "tcp_default_init_rwnd",
+		.data           = &sysctl_tcp_default_init_rwnd,
+		.maxlen         = sizeof(int),
+		.mode           = 0644,
+		.proc_handler   = proc_tcp_default_init_rwnd
+	},
+	{
 		.procname	= "icmp_msgs_per_sec",
 		.data		= &sysctl_icmp_msgs_per_sec,
 		.maxlen		= sizeof(int),
@@ -1171,6 +1194,17 @@ static struct ctl_table ipv4_net_table[] = {
 	{ }
 };
 
+static struct ctl_table net_table[] = {
+	{
+		.procname = "optr",
+		.data = &sysctl_optr,
+		.maxlen = sizeof(int),
+		.mode = 0664,
+		.proc_handler = proc_dointvec,
+	},
+	{ }
+};
+
 static __net_init int ipv4_sysctl_init_net(struct net *net)
 {
 	struct ctl_table *table;
@@ -1229,6 +1263,10 @@ static __init int sysctl_ipv4_init(void)
 	hdr = register_net_sysctl(&init_net, "net/ipv4", ipv4_table);
 	if (!hdr)
 		return -ENOMEM;
+
+	hdr = register_net_sysctl(&init_net, "net", net_table);
+	if (!hdr)
+		pr_info("[mtk_net] register net sysctl optr is fail.\n");
 
 	if (register_pernet_subsys(&ipv4_sysctl_ops)) {
 		unregister_net_sysctl_table(hdr);

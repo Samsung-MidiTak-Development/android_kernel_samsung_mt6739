@@ -196,6 +196,7 @@ static inline int ndisc_is_useropt(const struct net_device *dev,
 {
 	return opt->nd_opt_type == ND_OPT_RDNSS ||
 		opt->nd_opt_type == ND_OPT_DNSSL ||
+		opt->nd_opt_type == ND_OPT_CAPTIVE_PORTAL ||
 		ndisc_ops_is_useropt(dev, opt->nd_opt_type);
 }
 
@@ -1218,6 +1219,12 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 		 *	out on this interface.
 		 */
 		in6_dev->if_flags |= IF_RA_RCVD;
+	}
+
+	if (ip6_operator_isop12()) {
+		/*add for VzW feature : remove IF_RS_VZW_SENT flag*/
+		if (in6_dev->if_flags & IF_RS_VZW_SENT)
+			in6_dev->if_flags &= ~IF_RS_VZW_SENT;
 	}
 
 	/*

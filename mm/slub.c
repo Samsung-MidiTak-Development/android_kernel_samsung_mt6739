@@ -40,6 +40,10 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+#include <linux/sec_debug.h>
+#endif
+
 /*
  * Lock order:
  *   1. slab_mutex (Global Mutex)
@@ -198,7 +202,7 @@ static inline bool kmem_cache_has_cpu_partial(struct kmem_cache *s)
 /*
  * Tracking user of a slab.
  */
-#define TRACK_ADDRS_COUNT 16
+#define TRACK_ADDRS_COUNT 8
 struct track {
 	unsigned long addr;	/* Called from address */
 #ifdef CONFIG_STACKTRACE
@@ -601,8 +605,13 @@ static void print_track(const char *s, struct track *t)
 	if (!t->addr)
 		return;
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL7, "INFO: %s in %pS age=%lu cpu=%u pid=%d\n",
+		   s, (void *)t->addr, jiffies - t->when, t->cpu, t->pid);
+#else
 	pr_err("INFO: %s in %pS age=%lu cpu=%u pid=%d\n",
 	       s, (void *)t->addr, jiffies - t->when, t->cpu, t->pid);
+#endif
 #ifdef CONFIG_STACKTRACE
 	{
 		int i;
@@ -639,9 +648,15 @@ static void slab_bug(struct kmem_cache *s, char *fmt, ...)
 	va_start(args, fmt);
 	vaf.fmt = fmt;
 	vaf.va = &args;
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL7, "=============================================================================\n");
+	pr_auto(ASL7, "BUG %s (%s): %pV\n", s->name, print_tainted(), &vaf);
+	pr_auto(ASL7, "-----------------------------------------------------------------------------\n\n");
+#else
 	pr_err("=============================================================================\n");
 	pr_err("BUG %s (%s): %pV\n", s->name, print_tainted(), &vaf);
 	pr_err("-----------------------------------------------------------------------------\n\n");
+#endif
 
 	add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE);
 	va_end(args);
@@ -668,8 +683,13 @@ static void print_trailer(struct kmem_cache *s, struct page *page, u8 *p)
 
 	print_page_info(page);
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL7, "INFO: Object 0x%p @offset=%tu fp=0x%p\n\n",
+		   p, p - addr, get_freepointer(s, p));
+#else
 	pr_err("INFO: Object 0x%p @offset=%tu fp=0x%p\n\n",
 	       p, p - addr, get_freepointer(s, p));
+#endif
 
 	if (s->flags & SLAB_RED_ZONE)
 		print_section(KERN_ERR, "Redzone ", p - s->red_left_pad,
@@ -698,14 +718,20 @@ static void print_trailer(struct kmem_cache *s, struct page *page, u8 *p)
 		print_section(KERN_ERR, "Padding ", p + off,
 			      size_from_object(s) - off);
 
-	dump_stack();
+	BUG();
 }
 
 void object_err(struct kmem_cache *s, struct page *page,
 			u8 *object, char *reason)
 {
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto_once(7);
+#endif
 	slab_bug(s, "%s", reason);
 	print_trailer(s, page, object);
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto_disable(7);
+#endif
 }
 
 static __printf(3, 4) void slab_err(struct kmem_cache *s, struct page *page,
@@ -714,12 +740,18 @@ static __printf(3, 4) void slab_err(struct kmem_cache *s, struct page *page,
 	va_list args;
 	char buf[100];
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto_once(7);
+#endif
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	slab_bug(s, "%s", buf);
 	print_page_info(page);
-	dump_stack();
+	BUG();
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto_disable(7);
+#endif
 }
 
 static void init_object(struct kmem_cache *s, void *object, u8 val)
@@ -762,10 +794,19 @@ static int check_bytes_and_report(struct kmem_cache *s, struct page *page,
 	while (end > fault && end[-1] == value)
 		end--;
 
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto_once(7);
+	slab_bug(s, "%s overwritten", what);
+	pr_auto(ASL7, "INFO: 0x%p-0x%p. First byte 0x%x instead of 0x%x\n",
+					fault, end - 1, fault[0], value);
+	print_trailer(s, page, object);
+	pr_auto_disable(7);
+#else
 	slab_bug(s, "%s overwritten", what);
 	pr_err("INFO: 0x%p-0x%p. First byte 0x%x instead of 0x%x\n",
 					fault, end - 1, fault[0], value);
 	print_trailer(s, page, object);
+#endif
 
 	restore_bytes(s, what, value, fault, end);
 	return 0;
@@ -3518,7 +3559,7 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 
 	kasan_cache_create(s, &size, &s->flags);
 #ifdef CONFIG_SLUB_DEBUG
-	if (flags & SLAB_RED_ZONE) {
+	if (flags & SLAB_RED_ZONE && 0) {
 		/*
 		 * Add some empty padding so that we can catch
 		 * overwrites from earlier objects rather than let
@@ -5868,4 +5909,5 @@ ssize_t slabinfo_write(struct file *file, const char __user *buffer,
 {
 	return -EIO;
 }
+
 #endif /* CONFIG_SLABINFO */

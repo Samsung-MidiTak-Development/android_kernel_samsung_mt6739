@@ -912,6 +912,26 @@ struct task_struct *wq_worker_sleeping(struct task_struct *task)
 }
 
 /**
+ * wq_worker_last_func - retrieve worker's last work function
+ *
+ * Determine the last function a worker executed. This is called from
+ * the scheduler to get a worker's last known identity.
+ *
+ * CONTEXT:
+ * spin_lock_irq(rq->lock)
+ *
+ * Return:
+ * The last work function %current executed as a worker, NULL if it
+ * hasn't executed any work yet.
+ */
+work_func_t wq_worker_last_func(struct task_struct *task)
+{
+	struct worker *worker = kthread_data(task);
+
+	return worker->last_func;
+}
+
+/**
  * worker_set_flags - set worker flags and adjust nr_running accordingly
  * @worker: self
  * @flags: flags to set
@@ -2144,6 +2164,9 @@ __acquires(&pool->lock)
 	/* clear cpu intensive status */
 	if (unlikely(cpu_intensive))
 		worker_clr_flags(worker, WORKER_CPU_INTENSIVE);
+
+	/* tag the worker for identification in schedule() */
+	worker->last_func = worker->current_func;
 
 	/* we're done with it, release */
 	hash_del(&worker->hentry);
@@ -5477,8 +5500,12 @@ static void wq_watchdog_timer_fn(unsigned long data)
 
 	rcu_read_unlock();
 
-	if (lockup_detected)
+	if (lockup_detected) {
 		show_workqueue_state();
+#ifdef CONFIG_SEC_DEBUG_WORKQUEUE_LOCKUP_PANIC
+		BUG();
+#endif
+	}
 
 	wq_watchdog_reset_touched();
 	mod_timer(&wq_watchdog_timer, jiffies + thresh);

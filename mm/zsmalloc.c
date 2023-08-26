@@ -191,6 +191,7 @@ static struct vfsmount *zsmalloc_mnt;
  * (see: fix_fullness_group())
  */
 static const int fullness_threshold_frac = 4;
+static size_t huge_class_size;
 
 struct size_class {
 	spinlock_t lock;
@@ -577,6 +578,8 @@ static inline unsigned long zs_stat_get(struct size_class *class,
 	return class->stats.objs[type];
 }
 
+static unsigned long zs_can_compact(struct size_class *class);
+
 #ifdef CONFIG_ZSMALLOC_STAT
 
 static void __init zs_stat_init(void)
@@ -595,8 +598,6 @@ static void __exit zs_stat_exit(void)
 {
 	debugfs_remove_recursive(zs_stat_root);
 }
-
-static unsigned long zs_can_compact(struct size_class *class);
 
 static int zs_stats_size_show(struct seq_file *s, void *v)
 {
@@ -1431,6 +1432,25 @@ void zs_unmap_object(struct zs_pool *pool, unsigned long handle)
 }
 EXPORT_SYMBOL_GPL(zs_unmap_object);
 
+/**
+ * zs_huge_class_size() - Returns the size (in bytes) of the first huge
+ *                        zsmalloc &size_class.
+ * @pool: zsmalloc pool to use
+ *
+ * The function returns the size of the first huge class - any object of equal
+ * or bigger size will be stored in zspage consisting of a single physical
+ * page.
+ *
+ * Context: Any context.
+ *
+ * Return: the size (in bytes) of the first huge zsmalloc &size_class.
+ */
+size_t zs_huge_class_size(struct zs_pool *pool)
+{
+	return huge_class_size;
+}
+EXPORT_SYMBOL_GPL(zs_huge_class_size);
+
 static unsigned long obj_malloc(struct size_class *class,
 				struct zspage *zspage, unsigned long handle)
 {
@@ -1564,6 +1584,51 @@ static void obj_free(struct size_class *class, unsigned long obj)
 	zs_stat_dec(class, OBJ_USED, 1);
 }
 
+#define ZS_COMPACT_THRESHOLD	1024
+#define ZS_COMPACT_INTERVAL	10
+
+struct zs_pool *g_pool;
+
+static void do_zs_compact(struct work_struct *work)
+{
+	if (g_pool)
+		zs_compact(g_pool);
+}
+static DECLARE_WORK(zs_compact_work, do_zs_compact);
+
+static bool zs_compactable(struct zs_pool *pool, unsigned int pages)
+{
+	int i;
+	struct size_class *class;
+	unsigned long pages_to_free = 0;
+
+	for (i = ZS_SIZE_CLASSES - 1; i >= 0; i--) {
+		class = pool->size_class[i];
+		if (!class)
+			continue;
+		if (class->index != i)
+			continue;
+
+		pages_to_free += zs_can_compact(class);
+
+		if (pages_to_free >= pages)
+			return true;
+	}
+	return false;
+}
+
+static void try_schedule_zs_compact(struct zs_pool *pool)
+{
+	static unsigned long resume = INITIAL_JIFFIES;
+
+	if (g_pool == pool && time_is_before_jiffies(resume) &&
+			!work_pending(&zs_compact_work) &&
+			zs_compactable(pool, ZS_COMPACT_THRESHOLD)) {
+		resume = jiffies + ZS_COMPACT_INTERVAL * HZ;
+		schedule_work(&zs_compact_work);
+	}
+}
+
 void zs_free(struct zs_pool *pool, unsigned long handle)
 {
 	struct zspage *zspage;
@@ -1606,6 +1671,7 @@ out:
 	spin_unlock(&class->lock);
 	unpin_tag(handle);
 	cache_free_handle(pool, handle);
+	try_schedule_zs_compact(pool);
 }
 EXPORT_SYMBOL_GPL(zs_free);
 
@@ -2397,6 +2463,8 @@ static void zs_unregister_shrinker(struct zs_pool *pool)
 
 static int zs_register_shrinker(struct zs_pool *pool)
 {
+	if (g_pool == pool)
+		return -1;
 	pool->shrinker.scan_objects = zs_shrinker_scan;
 	pool->shrinker.count_objects = zs_shrinker_count;
 	pool->shrinker.batch = 0;
@@ -2454,6 +2522,27 @@ struct zs_pool *zs_create_pool(const char *name)
 		objs_per_zspage = pages_per_zspage * PAGE_SIZE / size;
 
 		/*
+		 * We iterate from biggest down to smallest classes,
+		 * so huge_class_size holds the size of the first huge
+		 * class. Any object bigger than or equal to that will
+		 * endup in the huge class.
+		 */
+		if (pages_per_zspage != 1 && objs_per_zspage != 1 &&
+				!huge_class_size) {
+			huge_class_size = size;
+			/*
+			 * The object uses ZS_HANDLE_SIZE bytes to store the
+			 * handle. We need to subtract it, because zs_malloc()
+			 * unconditionally adds handle size before it performs
+			 * size class search - so object may be smaller than
+			 * huge class size, yet it still can end up in the huge
+			 * class because it grows by ZS_HANDLE_SIZE extra bytes
+			 * right before class lookup.
+			 */
+			huge_class_size -= (ZS_HANDLE_SIZE - 1);
+		}
+
+		/*
 		 * size_class is used for normal zsmalloc operation such
 		 * as alloc/free for that size. Although it is natural that we
 		 * have one size_class for each size, there is a chance that we
@@ -2492,6 +2581,8 @@ struct zs_pool *zs_create_pool(const char *name)
 	if (zs_register_migration(pool))
 		goto err;
 
+	if (!g_pool)
+		g_pool = pool;
 	/*
 	 * Not critical, we still can use the pool
 	 * and user can trigger compaction manually.

@@ -34,6 +34,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/blk-cgroup.h>
 #include <linux/debugfs.h>
+#include <mt-plat/mtk_blocktag.h> /* MTK PATCH */
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/block.h>
@@ -2288,6 +2289,9 @@ blk_qc_t submit_bio(struct bio *bio)
 			count_vm_events(PGPGIN, count);
 		}
 
+#ifdef CONFIG_MTK_BLOCK_TAG
+		mtk_btag_pidlog_submit_bio(bio);
+#endif
 		if (unlikely(block_dump)) {
 			char b[BDEVNAME_SIZE];
 			printk(KERN_DEBUG "%s(%d): %s block %Lu on %s (%u sectors)\n",
@@ -2446,6 +2450,8 @@ void blk_account_io_completion(struct request *req, unsigned int bytes)
 		cpu = part_stat_lock();
 		part = req->part;
 		part_stat_add(cpu, part, sectors[rw], bytes >> 9);
+		if (req_op(req) == REQ_OP_DISCARD)
+			part_stat_add(cpu, part, discard_sectors, bytes >> 9);
 		part_stat_unlock();
 	}
 }
@@ -2470,10 +2476,17 @@ void blk_account_io_done(struct request *req)
 		part_stat_add(cpu, part, ticks[rw], duration);
 		part_round_stats(req->q, cpu, part);
 		part_dec_in_flight(req->q, part, rw);
+		if (req_op(req) == REQ_OP_DISCARD)
+			part_stat_inc(cpu, part, discard_ios);
+		if (!(req->rq_flags & RQF_STARTED))
+			part_stat_inc(cpu, part, flush_ios);
 
 		hd_struct_put(part);
 		part_stat_unlock();
 	}
+
+	if (req->rq_flags & RQF_FLUSH_SEQ)
+		req->q->flush_ios++;
 }
 
 #ifdef CONFIG_PM
@@ -2655,6 +2668,8 @@ static void blk_dequeue_request(struct request *rq)
 	 * the driver side.
 	 */
 	if (blk_account_rq(rq)) {
+		if (!queue_in_flight(q))
+			q->in_flight_stamp = ktime_get();
 		q->in_flight[rq_is_sync(rq)]++;
 		set_io_start_time_ns(rq);
 	}

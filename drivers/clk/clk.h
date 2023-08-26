@@ -34,3 +34,7 @@ static struct clk_hw *__clk_get_hw(struct clk *clk)
 }
 
 #endif
+
+#ifdef CONFIG_SEC_PM
+void clock_debug_print_enabled(void);
+#endif

@@ -1803,6 +1803,21 @@ config PID_IN_CONTEXTIDR
 	  additional instructions during context switch. Say Y here only if you
 	  are planning to use hardware trace tools with this kernel.
 
+comment "PowerManagement Feature"
+menuconfig SEC_PM
+	bool "Samsung PowerManagement Feature"
+	default y
+	help
+	  Samsung PowerManagement Feature.
+
+if SEC_PM
+config SEC_PM_DEBUG
+	bool "Samsung PowerManagement Debug Feature"
+	default n
+	help
+	  Samsung PowerManagement Debug Feature.
+endif
+
 source "drivers/hwtracing/coresight/Kconfig"
 
 endmenu

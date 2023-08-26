@@ -884,6 +884,7 @@ void __noreturn do_exit(long code)
 
 	sched_autogroup_exit_task(tsk);
 	cgroup_exit(tsk);
+	uclamp_exit_task(tsk);
 
 	/*
 	 * FIXME: do that only when needed, using sched_exit tracepoint
@@ -954,6 +955,14 @@ void
 do_group_exit(int exit_code)
 {
 	struct signal_struct *sig = current->signal;
+	
+#ifdef CONFIG_SEC_DEBUG_INIT_EXIT_PANIC
+	if (current->pid == 1) {
+		pr_err("[%s] trap before init(1) group exit, exit_code:%d\n",
+				current->comm, exit_code);
+		panic("Attempted to kill init task group! exitcode=0x%08x\n", exit_code);
+	}
+#endif
 
 	BUG_ON(exit_code & 0x80); /* core dumps don't get here */
 

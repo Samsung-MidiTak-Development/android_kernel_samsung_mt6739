@@ -81,7 +81,7 @@ static void read_cache_pages_invalidate_pages(struct address_space *mapping,
  * Hides the details of the LRU cache etc from the filesystems.
  */
 int read_cache_pages(struct address_space *mapping, struct list_head *pages,
-			int (*filler)(void *, struct page *), void *data)
+			int (*filler)(struct file *, struct page *), void *data)
 {
 	struct page *page;
 	int ret = 0;
@@ -221,7 +221,10 @@ int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	 * be up to the optimal hardware IO size
 	 */
 	max_pages = max_t(unsigned long, bdi->io_pages, ra->ra_pages);
-	nr_to_read = min(nr_to_read, max_pages);
+
+	if (likely(!(filp->f_flags & O_DIRECT)))
+		nr_to_read = min(nr_to_read, max_pages);
+
 	while (nr_to_read) {
 		int err;
 

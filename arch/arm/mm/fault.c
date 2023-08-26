@@ -26,6 +26,11 @@
 #include <asm/system_misc.h>
 #include <asm/system_info.h>
 #include <asm/tlbflush.h>
+#include <mt-plat/aee.h>
+
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+#include <linux/sec_debug.h>
+#endif
 
 #include "fault.h"
 
@@ -143,10 +148,19 @@ __do_kernel_fault(struct mm_struct *mm, unsigned long addr, unsigned int fsr,
 	 * No handler, we'll have to terminate things with extreme prejudice.
 	 */
 	bust_spinlocks(1);
+	
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "Unable to handle kernel %s at virtual address %08lx\n",
+		 (addr < PAGE_SIZE) ? "NULL pointer dereference" :
+		 "paging request", addr);
+#else
 	pr_alert("Unable to handle kernel %s at virtual address %08lx\n",
 		 (addr < PAGE_SIZE) ? "NULL pointer dereference" :
 		 "paging request", addr);
-
+#endif
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	sec_debug_set_extra_info_fault(addr, regs);
+#endif
 	show_pte(mm, addr);
 	die("Oops", regs, fsr);
 	bust_spinlocks(0);
@@ -206,6 +220,20 @@ void do_bad_area(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 #define VM_FAULT_BADMAP		0x010000
 #define VM_FAULT_BADACCESS	0x020000
 
+#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
+bool __access_error(unsigned long fsr, unsigned long vma_flags)
+{
+	unsigned int mask = VM_READ | VM_WRITE | VM_EXEC;
+
+	if ((fsr & FSR_WRITE) && !(fsr & FSR_CM))
+		mask = VM_WRITE;
+	if (fsr & FSR_LNX_PF)
+		mask = VM_EXEC;
+
+	return vma_flags & mask ? false : true;
+}
+#endif
+
 /*
  * Check that the permissions on the VMA allow for the fault which occurred.
  * If we encountered a write fault, we must have write permission, otherwise
@@ -215,7 +243,7 @@ static inline bool access_error(unsigned int fsr, struct vm_area_struct *vma)
 {
 	unsigned int mask = VM_READ | VM_WRITE | VM_EXEC;
 
-	if (fsr & FSR_WRITE)
+	if ((fsr & FSR_WRITE) && !(fsr & FSR_CM))
 		mask = VM_WRITE;
 	if (fsr & FSR_LNX_PF)
 		mask = VM_EXEC;
@@ -277,16 +305,24 @@ do_page_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 		local_irq_enable();
 
 	/*
-	 * If we're in an interrupt or have no user
+	 * If we're in an interrupt, or have no irqs, or have no user
 	 * context, we must not take the fault..
 	 */
-	if (faulthandler_disabled() || !mm)
+	if (faulthandler_disabled() || irqs_disabled() || !mm)
 		goto no_context;
 
 	if (user_mode(regs))
 		flags |= FAULT_FLAG_USER;
-	if (fsr & FSR_WRITE)
+	if ((fsr & FSR_WRITE) && !(fsr & FSR_CM))
 		flags |= FAULT_FLAG_WRITE;
+
+	/*
+	 * let's try a speculative page fault without grabbing the
+	 * mmap_sem.
+	 */
+	fault = handle_speculative_fault(mm, addr, flags, (unsigned long)fsr);
+	if (fault != VM_FAULT_RETRY)
+		goto done;
 
 	/*
 	 * As per x86, we may deadlock here.  However, since the kernel only
@@ -352,6 +388,7 @@ retry:
 
 	up_read(&mm->mmap_sem);
 
+done:
 	/*
 	 * Handle the "normal" case first - VM_FAULT_MAJOR
 	 */
@@ -551,14 +588,46 @@ hook_fault_code(int nr, int (*fn)(unsigned long, unsigned int, struct pt_regs *)
 asmlinkage void __exception
 do_DataAbort(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 {
+	struct thread_info *thread = current_thread_info();
 	const struct fsr_info *inf = fsr_info + fsr_fs(fsr);
 	struct siginfo info;
 
-	if (!inf->fn(addr, fsr & ~FSR_LNX_PF, regs))
-		return;
+	if (!user_mode(regs)) {
+		thread->cpu_excp++;
+		if (thread->cpu_excp == 1) {
+			thread->regs_on_excp = (void *)regs;
+			aee_excp_regs = (void *)regs;
+		}
+		/*
+		 * NoteXXX: The data abort exception may happen twice
+		 *          when calling probe_kernel_address() in which.
+		 *          __copy_from_user_inatomic() is used and the
+		 *          fixup table lookup may be performed.
+		 *          Check if the nested panic happens via
+		 *          (cpu_excp >= 3).
+		 */
+		if (thread->cpu_excp >= 3)
+			aee_stop_nested_panic(regs);
+	}
 
+	if (!inf->fn(addr, fsr & ~FSR_LNX_PF, regs)) {
+		if (!user_mode(regs))
+			thread->cpu_excp--;
+		return;
+	}
+
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "Unhandled fault: %s (0x%03x) at 0x%08lx\n",
+		 inf->name, fsr, addr);
+#else
 	pr_alert("Unhandled fault: %s (0x%03x) at 0x%08lx\n",
 		inf->name, fsr, addr);
+#endif
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (!user_mode(regs)) {
+		sec_debug_set_extra_info_fault(addr, regs);
+	}
+#endif
 	show_pte(current->mm, addr);
 
 	info.si_signo = inf->sig;
@@ -584,14 +653,44 @@ hook_ifault_code(int nr, int (*fn)(unsigned long, unsigned int, struct pt_regs *
 asmlinkage void __exception
 do_PrefetchAbort(unsigned long addr, unsigned int ifsr, struct pt_regs *regs)
 {
+	struct thread_info *thread = current_thread_info();
 	const struct fsr_info *inf = ifsr_info + fsr_fs(ifsr);
 	struct siginfo info;
 
-	if (!inf->fn(addr, ifsr | FSR_LNX_PF, regs))
-		return;
+	if (!user_mode(regs)) {
+		thread->cpu_excp++;
+		if (thread->cpu_excp == 1)
+			thread->regs_on_excp = (void *)regs;
+		/*
+		 * NoteXXX: The data abort exception may happen twice
+		 *          when calling probe_kernel_address() in which.
+		 *          __copy_from_user_inatomic() is used and the
+		 *          fixup table lookup may be performed.
+		 *          Check if the nested panic happens via
+		 *          (cpu_excp >= 3).
+		 */
+		if (thread->cpu_excp >= 3)
+			aee_stop_nested_panic(regs);
+	}
 
+	if (!inf->fn(addr, ifsr | FSR_LNX_PF, regs)) {
+		if (!user_mode(regs))
+			thread->cpu_excp--;
+		return;
+	}
+
+#ifdef CONFIG_SEC_DEBUG_AUTO_COMMENT
+	pr_auto(ASL1, "Unhandled prefetch abort: %s (0x%03x) at 0x%08lx\n",
+		inf->name, ifsr, addr);
+#else
 	pr_alert("Unhandled prefetch abort: %s (0x%03x) at 0x%08lx\n",
 		inf->name, ifsr, addr);
+#endif
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	if (!user_mode(regs)) {
+		sec_debug_set_extra_info_fault(addr, regs);
+	}
+#endif
 
 	info.si_signo = inf->sig;
 	info.si_errno = 0;
