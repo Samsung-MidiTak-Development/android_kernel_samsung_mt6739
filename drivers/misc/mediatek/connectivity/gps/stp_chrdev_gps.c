@@ -1192,11 +1192,7 @@ static int GPS_init(void)
 #endif
 #endif
 	pr_warn("%s driver(major %d) installed.\n", GPS_DRIVER_NAME, GPS_major);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 149)
-	gps_wake_lock_ptr = wakeup_source_register(NULL, gps_wake_lock_name);
-#else
 	gps_wake_lock_ptr = wakeup_source_register(gps_wake_lock_name);
-#endif
 	if (!gps_wake_lock_ptr) {
 		pr_info("%s %d: init wakeup source fail!", __func__, __LINE__);
 		goto error;
