@@ -10,7 +10,7 @@ ifeq ($(CONFIG_MTK_COMBO_CHIP),)
 endif
 
 #Force to m
-export CONFIG_MTK_COMBO_WIFI=m
+export CONFIG_MTK_COMBO_WIFI=y
 
 # Force build fail on modpost warning
 KBUILD_MODPOST_FAIL_ON_WARNINGS := y
