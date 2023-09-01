@@ -5,7 +5,6 @@ LOCAL_PATH := $(srctree)/drivers/misc/mediatek/devapc
 subdir-ccflags-$(CONFIG_MTK_ENG_BUILD) += -DDBG_ENABLE
 
 ifneq ($(wildcard $(LOCAL_PATH)/$(MTK_PLATFORM)/Makefile),)
-   $(info DEVAPC legacy driver build...)
     obj-$(CONFIG_DEVAPC_LEGACY) += $(MTK_PLATFORM)/
 else
   # Core
