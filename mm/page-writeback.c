@@ -100,7 +100,7 @@ int vm_highmem_is_dirtyable;
 #ifdef CONFIG_LARGE_DIRTY_BUFFER
 int vm_dirty_ratio = 20;
 #else
-int vm_dirty_ratio;
+int vm_dirty_ratio = 30;
 #endif
 
 /*
@@ -116,7 +116,7 @@ unsigned long vm_dirty_bytes = 50 * 1024 * 1024;
 /*
  * The interval between `kupdate'-style writebacks
  */
-unsigned int dirty_writeback_interval = 5 * 100; /* centiseconds */
+unsigned int dirty_writeback_interval; /* centiseconds */
 
 EXPORT_SYMBOL_GPL(dirty_writeback_interval);
 
