@@ -71,15 +71,9 @@ uint64_t sdsp_elf_pa[2] = { 0, 0 };
 #include "mtee_ut/gz_sec_storage_ut.h"
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_ENG_BUILD)
 #define KREE_DEBUG(fmt...) pr_debug("[KREE]" fmt)
 #define KREE_INFO(fmt...) pr_info("[KREE]" fmt)
 #define KREE_ERR(fmt...) pr_info("[KREE][ERR]" fmt)
-#else
-#define KREE_DEBUG(fmt...)
-#define KREE_INFO(fmt...) pr_info("[KREE]" fmt)
-#define KREE_ERR(fmt...) pr_info("[KREE][ERR]" fmt)
-#endif
 
 static const struct file_operations fops = {.owner = THIS_MODULE,
 	.open = gz_dev_open,
@@ -153,16 +147,32 @@ static ssize_t gz_test_store(struct device *dev,
 		th = kthread_run(chunk_memory_ut, NULL, "MCM UT");
 		break;
 	case '6':
-		KREE_DEBUG("test VReg\n");
-		th = kthread_run(vreg_test, NULL, "VReg test");
+		KREE_DEBUG("test RKP Basic UT by smc\n");
+		th = kthread_run(test_rkp_basic_by_smc, NULL, "RKP_UT");
+		break;
+	case '7':
+		KREE_DEBUG("stress test RKP UT by vreg\n");
+		th = kthread_run(test_rkp_stress_by_smc, NULL, "RKP_ST");
+		break;
+	case '8':
+		KREE_DEBUG("test RKP by malloc buffer/UPT/RD/WR.\n");
+		th = kthread_run(test_rkp_mix_op, NULL, "RKP_MIX_OP");
 		break;
 	case '9':
-		KREE_DEBUG("test RKP_GZKM\n");
-		th = kthread_run(test_rkp_gzkernel_memory, NULL, "RKP_GZKM");
+		KREE_DEBUG("test RKP: malloc buffer w/ 2 threads\n");
+		th = kthread_run(test_rkp_by_malloc_buf, NULL, "RKP_multi_smc");
 		break;
 	case 'a':
-		KREE_DEBUG("test RKP\n");
-		th = kthread_run(test_rkp, NULL, "RKP_LinuxKM");
+		KREE_DEBUG("test RKP by GZ driver\n");
+		th = kthread_run(test_rkp_by_gz_driver, NULL, "RKP_gz_drv");
+		break;
+	case 'b':
+		KREE_DEBUG("test RKP Basic UT by vreg\n");
+		th = kthread_run(test_rkp_basic_by_vreg, NULL, "RKP_UT");
+		break;
+	case 'c':
+		KREE_DEBUG("stress test RKP UT by vreg\n");
+		th = kthread_run(test_rkp_stress_by_vreg, NULL, "RKP_STRESS");
 		break;
 	case 'C':
 		KREE_DEBUG("test GZ Secure Storage\n");
@@ -977,7 +987,7 @@ static long _sc_test_cp_chm2shm(struct file *filep, unsigned long arg)
 	/* copy param from user */
 	ret = copy_from_user(&cparam, (void *)arg, sizeof(cparam));
 
-	if (ret < 0) {
+	if (ret) {
 		KREE_ERR("%s: copy_from_user failed(%d)\n", __func__, ret);
 		return ret;
 	}
@@ -1017,7 +1027,7 @@ static long _sc_test_upt_chmdata(struct file *filep, unsigned long arg)
 	/* copy param from user */
 	ret = copy_from_user(&cparam, (void *)arg, sizeof(cparam));
 
-	if (ret < 0) {
+	if (ret) {
 		KREE_ERR("%s: copy_from_user failed(%d)\n", __func__, ret);
 		return ret;
 	}
@@ -1231,7 +1241,7 @@ TZ_RESULT gz_manual_adjust_trusty_wq_attr(char __user *user_req)
 	struct trusty_task_attr manual_task_attr;
 
 	err = copy_from_user(&str, user_req, sizeof(str));
-	if (err < 0) {
+	if (err) {
 		KREE_ERR("[%s]copy_from_user fail(0x%x)\n", __func__,
 			err);
 		return err;
@@ -1282,7 +1292,7 @@ static long _gz_ioctl(struct file *filep, unsigned int cmd, unsigned long arg,
 		KREE_DEBUG("[%s]cmd=MTEE_CMD_SHM_REG(0x%x)\n", __func__, cmd);
 		/* copy param from user */
 		err = copy_from_user(&shm_data, user_req, sizeof(shm_data));
-		if (err < 0) {
+		if (err) {
 			KREE_ERR("[%s]copy_from_user fail(0x%x)\n", __func__,
 				err);
 			return err;
@@ -1306,7 +1316,7 @@ static long _gz_ioctl(struct file *filep, unsigned int cmd, unsigned long arg,
 		/* copy result back to user */
 		shm_data.session = ret;
 		err = copy_to_user(user_req, &shm_data, sizeof(shm_data));
-		if (err < 0) {
+		if (err) {
 			KREE_ERR("[%s]copy_to_user fail(0x%x)\n", __func__,
 				err);
 			return err;
@@ -1358,7 +1368,7 @@ static long _gz_ioctl(struct file *filep, unsigned int cmd, unsigned long arg,
 		KREE_DEBUG("[%s]cmd=MTEE_CMD_SC_CHMEM_HANDLE(0x%x)\n", __func__,
 			cmd);
 		err = copy_from_user(&cparam, user_req, sizeof(cparam));
-		if (err < 0) {
+		if (err) {
 			KREE_ERR("[%s]copy_from_user fail(0x%x)\n", __func__,
 				err);
 			return err;
@@ -1372,7 +1382,7 @@ static long _gz_ioctl(struct file *filep, unsigned int cmd, unsigned long arg,
 			return ret;
 		}
 		err = copy_to_user(user_req, &cparam, sizeof(cparam));
-		if (err < 0) {
+		if (err) {
 			KREE_ERR("[%s]copy_to_user fail(0x%x)\n", __func__,
 				err);
 			return err;
@@ -1444,12 +1454,16 @@ static struct devapc_vio_callbacks gz_devapc_vio_handle = {
 };
 #endif
 
+uint64_t va_gz_test_store;
 /************ kernel module init entry ***************/
 static int __init gz_init(void)
 {
 	int res;
 
 	tz_system_dev = NULL;
+
+	va_gz_test_store = (uint64_t) &gz_test_store;
+	//KREE_DEBUG("[gz_main.c]====> gz_test_store VA=0x%llx\n", va_gz_test_store);
 
 	res = create_files();
 	if (res) {

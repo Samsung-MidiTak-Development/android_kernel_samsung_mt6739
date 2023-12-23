@@ -600,21 +600,6 @@ unsigned long kbase_mem_evictable_reclaim_count_objects(struct shrinker *s,
 	struct kbase_mem_phy_alloc *alloc;
 	unsigned long pages = 0;
 
-	WARN((sc->gfp_mask & __GFP_ATOMIC),
-        "Shrinkers cannot be called for GFP_ATOMIC allocations. Check kernel mm for problems. gfp_mask==%x\n", sc->gfp_mask);
-	WARN(in_atomic(),
-        "Shrinker called whilst in atomic context. The caller must switch to using GFP_ATOMIC or similar. gfp_mask==%x\n", sc->gfp_mask);
-	WARN(in_interrupt (),
-        "Shrinker called whilst in interrupt context. The caller must switch to using GFP_ATOMIC or similar. gfp_mask==%x\n", sc->gfp_mask);
-	/*
-	 * [GPUCORE-27200] WA for scheduling while atomic avoidance
-	 * return 0 while callback is called with GFP_ATOMIC or atomic/interrupt context
-	 */
-	if (unlikely(in_atomic() || in_interrupt() || (sc->gfp_mask & __GFP_ATOMIC))) {
-		return 0;
-	}
-
-
 	kctx = container_of(s, struct kbase_context, reclaim);
 
 	// MTK add to prevent false alarm
@@ -660,20 +645,6 @@ unsigned long kbase_mem_evictable_reclaim_scan_objects(struct shrinker *s,
 	struct kbase_mem_phy_alloc *alloc;
 	struct kbase_mem_phy_alloc *tmp;
 	unsigned long freed = 0;
-
-	WARN((sc->gfp_mask & __GFP_ATOMIC),
-	"Shrinkers cannot be called for GFP_ATOMIC allocations. Check kernel mm for problems. gfp_mask==%x\n", sc->gfp_mask);
-	WARN(in_atomic(),
-	"Shrinker called whilst in atomic context. The caller must switch to using GFP_ATOMIC or similar. gfp_mask==%x\n", sc->gfp_mask);
-	WARN(in_interrupt (),
-	"Shrinker called whilst in interrupt context. The caller must switch to using GFP_ATOMIC or similar. gfp_mask==%x\n", sc->gfp_mask);
-	/*
-	 * [GPUCORE-27200] WA for scheduling while atomic avoidance
-	 * return 0 while callback is called with GFP_ATOMIC or atomic/interrupt context
-	 */
-	if (unlikely(in_atomic() || in_interrupt() || (sc->gfp_mask & __GFP_ATOMIC))) {
-		return 0;
-	}
 
 	kctx = container_of(s, struct kbase_context, reclaim);
 
@@ -1526,7 +1497,7 @@ static struct kbase_va_region *kbase_mem_from_umm(struct kbase_context *kctx,
 		return NULL;
 	}
 
-	handle = ion_import_dma_buf_fd(kctx->kbdev->client, fd);
+	handle = ion_import_dma_buf(kctx->kbdev->client, dma_buf);
 
 	if (IS_ERR(handle)) {
 		dev_warn(kctx->kbdev->dev, "import ion handle failed!\n");

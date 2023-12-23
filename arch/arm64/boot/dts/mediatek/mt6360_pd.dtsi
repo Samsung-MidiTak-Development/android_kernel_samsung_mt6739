@@ -33,6 +33,10 @@
 		mt6360pd,pcb_gpio_num = <16>;
 		/* 0: gpio low as phone, 1: gpio high as phone */
 		mt6360pd,pcb_gpio_polarity = <0>;
+#ifdef CONFIG_SEC_USB_SS_SWITCH
+		ss-tcpc,usb_switch_gpio = <&pio 11 0x0>;
+		ss-tcpc,usb_switch_gpio_num = <11>;
+#endif
 		interrupt-parent = <&mt6360_pmu>;
 		interrupts = <64 0>;
 		interrupt-names = "usbid_evt";
@@ -57,15 +61,18 @@
 
 			/*
 			 * No DP, host + device
-			 *	pd,id-vdo-size = <3>;
-			 *	pd,id-vdo-data = <0xd10029cf 0x0 0x63600000>;
+			 *	pd,id-vdo-size = <6>;
+			 *	pd,id-vdo-data = <0xd14029cf 0x0 0x63600000
+						 0x40800010 0x0 0x20800000>;
 			 * With DP
-			 *	pd,id-vdo-size = <3>;
-			 *	pd,id-vdo-data = <0xd60029cf 0x0 0x63600000>;
+			 *	pd,id-vdo-size = <6>;
+			 *	pd,id-vdo-data = <0xd54029cf 0x0 0x63600000
+						 0x40800010 0x0 0x20800000>;
 			 */
 
-			pd,id-vdo-size = <3>;
-			pd,id-vdo-data = <0xd60029cf 0x0 0x63600000>;
+			pd,id-vdo-size = <6>;
+			pd,id-vdo-data = <0xd14029cf 0x0 0x63600000
+					 0x40800010 0x0 0x20800000>;
 
 			bat,nr = <1>;
 			bat-info0 {

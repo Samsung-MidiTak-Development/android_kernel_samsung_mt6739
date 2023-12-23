@@ -172,7 +172,8 @@ static int vdec_init(struct mtk_vcodec_ctx *ctx, unsigned long *h_vdec)
 	}
 
 	inst->vsi = (struct vdec_vsi *)inst->vcu.vsi;
-	ctx->input_driven = inst->vsi->input_driven;
+	if (inst->vsi != NULL)
+		ctx->input_driven = inst->vsi->input_driven;
 
 	mtk_vcodec_debug(inst, "Decoder Instance >> %p", inst);
 
@@ -631,7 +632,6 @@ static int vdec_set_param(unsigned long h_vdec,
 	case SET_PARAM_WAIT_KEY_FRAME:
 	case SET_PARAM_OPERATING_RATE:
 	case SET_PARAM_TOTAL_FRAME_BUFQ_COUNT:
-	case SET_PARAM_FORCE_RES_CHANGE:
 		vcu_dec_set_param(&inst->vcu, (unsigned int)type, in, 1U);
 		break;
 	case SET_PARAM_UFO_MODE:

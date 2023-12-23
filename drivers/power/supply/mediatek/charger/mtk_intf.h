@@ -43,7 +43,6 @@ extern int charger_get_ibat(u32 *ibat);
 extern int charger_set_constant_voltage(u32 uV);
 extern int charger_enable_termination(bool en);
 extern int charger_enable_powerpath(bool en);
-extern int charger_force_disable_powerpath(bool disable);
 extern int charger_dump_registers(void);
 
 extern int adapter_set_cap(int mV, int mA);
@@ -55,6 +54,8 @@ extern int adapter_get_status(struct ta_status *sta);
 extern int adapter_is_support_pd_pps(void);
 
 extern int adapter_get_cap(struct pd_cap *cap);
+extern bool adapter_is_src_usb_suspend_support(void);
+extern bool adapter_is_src_usb_communication_capable(void);
 extern int adapter_is_support_pd(void);
 
 extern int set_charger_manager(struct charger_manager *info);

@@ -59,3 +59,15 @@ source "drivers/nfc/nxp-nci/Kconfig"
 source "drivers/nfc/s3fwrn5/Kconfig"
 source "drivers/nfc/st95hf/Kconfig"
 endmenu
+
+config SEC_NFC
+       bool "Samsung NFC driver"
+       default n
+       help
+         This adds support for
+	     SAMSUNG NFC.
+
+         If unsure, say N.
+
+source "drivers/nfc/nxp/Kconfig"
+source "drivers/nfc/nfc_logger/Kconfig"

@@ -28,6 +28,10 @@
 #include "scp_feature_define.h"
 #include "scp_l1c.h"
 
+#ifdef CONFIG_SENSORS_SSP
+#include "../../../../sensorhub/ssp_platform.h"
+#endif
+
 struct scp_dump_st {
 	uint8_t *detail_buff;
 	uint8_t *ramdump;
@@ -300,6 +304,9 @@ static void scp_prepare_aed_dump(char *aed_str,
 	memset(md, 0x0, sizeof(*md));
 	scp_dump.ramdump_length = scp_crash_dump(md, SCP_A_ID);
 
+#ifdef CONFIG_SENSORS_SSP
+	sensorhub_dump_write_file((void *)scp_dump.ramdump, scp_dump.ramdump_length);
+#endif
 	pr_notice("[SCP] %s ends, @%px, size = %x\n", __func__,
 		md, scp_dump.ramdump_length);
 }
@@ -369,7 +376,7 @@ static ssize_t scp_A_dump_show(struct file *filep,
 		struct kobject *kobj, struct bin_attribute *attr,
 		char *buf, loff_t offset, size_t size)
 {
-	unsigned int length = 0;
+	size_t length = 0;
 
 	mutex_lock(&scp_excep_mutex);
 

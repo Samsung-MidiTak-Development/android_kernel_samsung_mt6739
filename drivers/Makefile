@@ -72,7 +72,7 @@ obj-$(CONFIG_FB_INTEL)          += video/fbdev/intelfb/
 
 obj-$(CONFIG_PARPORT)		+= parport/
 obj-$(CONFIG_NVM)		+= lightnvm/
-obj-y				+= base/ block/ misc/ mfd/ nfc/
+obj-y				+= base/ block/ misc/ mfd/
 obj-$(CONFIG_LIBNVDIMM)		+= nvdimm/
 obj-$(CONFIG_DAX)		+= dax/
 obj-$(CONFIG_DMA_SHARED_BUFFER) += dma-buf/
@@ -114,6 +114,7 @@ obj-$(CONFIG_GAMEPORT)		+= input/gameport/
 obj-$(CONFIG_INPUT)		+= input/
 obj-$(CONFIG_RTC_LIB)		+= rtc/
 obj-y				+= i2c/ media/
+obj-y				+= nfc/
 obj-$(CONFIG_PPS)		+= pps/
 obj-y				+= ptp/
 obj-$(CONFIG_W1)		+= w1/
@@ -185,3 +186,28 @@ obj-$(CONFIG_TEE)		+= tee/
 obj-$(CONFIG_MULTIPLEXER)	+= mux/
 obj-$(CONFIG_TRUSTY)	+= trusty/
 obj-$(CONFIG_GNSS)		+= gnss/
+obj-$(CONFIG_SEC_EXT)	+= samsung/
+obj-$(CONFIG_SWITCH)	+= switch/
+
+# uH
+obj-$(CONFIG_UH)		+= uh/
+
+#Sensor
+obj-$(CONFIG_SENSORS)		+= sensors/
+
+# SPU signature verify
+obj-$(CONFIG_SPU_VERIFY) += spu_verify/
+
+# OLOG
+obj-y				+= kperfmon/
+obj-y += battery/charger/s2mu005_charger/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += vibrator/common/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += sti/abc/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += muic/slsi/s2mu005/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += input/input_boost/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += muic/common/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += hwmon/sec_thermistor/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += mfd/slsi/s2mu005/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += battery/fuelgauge/s2mu005_fuelgauge/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += battery/common/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+obj-y += vibrator/dc/ # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
