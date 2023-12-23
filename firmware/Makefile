@@ -12,6 +12,7 @@ fwabs := $(addprefix $(srctree)/,$(filter-out /%,$(fwdir)))$(filter /%,$(fwdir))
 fw-external-y := $(subst $(quote),,$(CONFIG_EXTRA_FIRMWARE))
 fw-external-$(CONFIG_FIVE_TEE_DRIVER) += five/ffffffff000000000000000000000072.tlbin
 
+fw-external-$(CONFIG_TOUCHSCREEN_SYNAPTICS_TCM_A01CORE) += tsp_synaptics/td4150_a01core.img
 ifeq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6739"))
 fw-external-$(CONFIG_TOUCHSCREEN_SYNAPTICS_TCM) += tsp_synaptics/PR2100000870-td4150b0_01010011_20200504.img
 else
