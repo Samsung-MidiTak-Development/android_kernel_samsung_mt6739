@@ -1260,6 +1260,7 @@ source "drivers/input/touchscreen/synaptics/td4150/Kconfig"
 source "drivers/input/touchscreen/synaptics/td4150_a01core/Kconfig"
 source "drivers/input/touchscreen/ili9881x/Kconfig"
 source "drivers/input/touchscreen/novatek/nt36525/Kconfig"
+source "drivers/input/touchscreen/novatek/nt36525_a01core/Kconfig"
 source "drivers/input/touchscreen/imagis/ist4050/Kconfig"
 source "drivers/input/touchscreen/zinitix/zt75xx/Kconfig"
 endif
