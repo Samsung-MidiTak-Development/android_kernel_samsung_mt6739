@@ -370,9 +370,6 @@ static int mtk_set_host(bool enable)
 	return 0;
 }
 
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-extern void set_ncm_ready(bool ready);
-#endif
 static int mtk_set_peripheral(bool enable)
 {
 #if IS_ENABLED(CONFIG_USB_MTK_HDRC)
@@ -381,9 +378,6 @@ static int mtk_set_peripheral(bool enable)
 		mt_usb_connect();
 	else {
 		mt_usb_disconnect();
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-		set_ncm_ready(false);
-#endif
 	}
 	pr_info("%s -\n", __func__);
 #endif

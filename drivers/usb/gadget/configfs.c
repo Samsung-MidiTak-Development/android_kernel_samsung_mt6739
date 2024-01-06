@@ -22,10 +22,7 @@
 #endif
 
 #include "mtk_gadget.h"
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-extern int terminal_ctrl_request(struct usb_composite_dev *cdev,
-	const struct usb_ctrlrequest *ctrl);
-#endif
+
 #ifdef CONFIG_USB_CONFIGFS_F_ACC
 extern int acc_ctrlrequest(struct usb_composite_dev *cdev,
 				const struct usb_ctrlrequest *ctrl);
@@ -84,11 +81,6 @@ EXPORT_SYMBOL(get_usb_enumeration_state);
 struct device *create_function_device(char *name)
 {
 	if (android_device && !IS_ERR(android_device)) {
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-		if (!strcmp(name, "terminal_version"))
-			return android_device;
-		else
-#endif
 		return device_create(android_class, android_device,
 			MKDEV(0, index++), NULL, name);
 	} else
@@ -1757,14 +1749,7 @@ static void configfs_composite_resume(struct usb_gadget *gadget)
 	composite_resume(gadget);
 	spin_unlock_irqrestore(&gi->spinlock, flags);
 }
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-static void android_gadget_complete(struct usb_ep *ep, struct usb_request *req)
-{
-	if (req->status || req->actual != req->length)
-			printk(KERN_DEBUG "usb: %s: %d, %d/%d\n", __func__,
-				req->status, req->actual, req->length);
-}
-#endif
+
 #ifdef CONFIG_USB_CONFIGFS_UEVENT
 static int android_setup(struct usb_gadget *gadget,
 			const struct usb_ctrlrequest *c)
@@ -1773,15 +1758,7 @@ static int android_setup(struct usb_gadget *gadget,
 	unsigned long flags;
 	struct gadget_info *gi = container_of(cdev, struct gadget_info, cdev);
 	int value = -EOPNOTSUPP;
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-	struct usb_configuration *configuration;
-	struct usb_function *f;
-	struct usb_request		*req = cdev->req;
-
-	req->complete = android_gadget_complete;
-#else
 	struct usb_function_instance *fi;
-#endif
 
 	pr_info("usb: %s\n", __func__);
 
@@ -1791,20 +1768,6 @@ static int android_setup(struct usb_gadget *gadget,
 		schedule_work(&gi->work);
 	}
 	spin_unlock_irqrestore(&cdev->lock, flags);
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-	list_for_each_entry(configuration, &cdev->configs, list) {
-		list_for_each_entry(f, &configuration->functions, list) {
-			if (f != NULL && f->ctrlrequest != NULL) {
-				value = f->ctrlrequest(f, c);
-				if (value >= 0)
-					break;
-			}
-		}
-	}
-	
-	if (value < 0)
-		value = terminal_ctrl_request(cdev, c);
-#else
 	list_for_each_entry(fi, &gi->available_func, cfs_list) {
 		if (fi != NULL && fi->f != NULL && fi->f->setup != NULL) {
 			value = fi->f->setup(fi->f, c);
@@ -1812,7 +1775,6 @@ static int android_setup(struct usb_gadget *gadget,
 				break;
 		}
 	}
-#endif
 
 #ifdef CONFIG_USB_CONFIGFS_F_ACC
 	if (value < 0)
